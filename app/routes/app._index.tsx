@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import type { Html5Qrcode as Html5QrcodeScanner } from "html5-qrcode";
 import type {
   ActionFunctionArgs,
   HeadersFunction,
@@ -44,17 +45,6 @@ type SaveActionData = {
 };
 
 type ActionData = LookupActionData | SaveActionData;
-
-type DetectedBarcode = {
-  rawValue?: string;
-};
-
-type BarcodeDetectorClass = {
-  new (options?: { formats?: string[] }): {
-    detect: (source: ImageBitmapSource) => Promise<DetectedBarcode[]>;
-  };
-  getSupportedFormats?: () => Promise<string[]>;
-};
 
 type VariantNode = {
   id: string;
@@ -187,18 +177,6 @@ function getVariantLabel(variant: VariantSummary) {
   return variant.variantTitle === "Default Title"
     ? variant.productTitle
     : `${variant.productTitle} - ${variant.variantTitle}`;
-}
-
-function getBarcodeDetector() {
-  if (typeof window === "undefined") {
-    return null;
-  }
-
-  const detector = (window as Window & {
-    BarcodeDetector?: BarcodeDetectorClass;
-  }).BarcodeDetector;
-
-  return detector ?? null;
 }
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -387,16 +365,14 @@ export default function Index() {
   const lookupFetcher = useFetcher<ActionData>();
   const saveFetcher = useFetcher<ActionData>();
   const shopify = useAppBridge();
-  const videoRef = useRef<HTMLVideoElement | null>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-  const detectorRef = useRef<InstanceType<BarcodeDetectorClass> | null>(null);
-  const scanTimeoutRef = useRef<number | null>(null);
+  const scannerRef = useRef<Html5QrcodeScanner | null>(null);
+  const lastScannedRef = useRef("");
   const [barcode, setBarcode] = useState("");
   const [cameraState, setCameraState] = useState<
     "idle" | "starting" | "scanning"
   >("idle");
   const [cameraMessage, setCameraMessage] = useState(
-    "Use your phone camera to scan a barcode when the browser supports live barcode detection.",
+    "Use your phone camera to scan a barcode. This scanner uses a JavaScript decoder for better mobile compatibility.",
   );
 
   const isLookupLoading =
@@ -409,22 +385,25 @@ export default function Index() {
     (saveFetcher.data?.intent === "save" ? saveFetcher.data.variant : null) ??
     (lookupFetcher.data?.intent === "lookup" ? lookupFetcher.data.variant : null);
 
-  const stopCamera = () => {
-    if (scanTimeoutRef.current != null) {
-      window.clearTimeout(scanTimeoutRef.current);
-      scanTimeoutRef.current = null;
-    }
+  const stopCamera = async () => {
+    const scanner = scannerRef.current;
 
-    if (streamRef.current) {
-      for (const track of streamRef.current.getTracks()) {
-        track.stop();
+    if (scanner) {
+      try {
+        if (scanner.isScanning) {
+          await scanner.stop();
+        }
+      } catch {
+        // Ignore shutdown errors from the scanner runtime.
       }
-      streamRef.current = null;
-    }
 
-    if (videoRef.current) {
-      videoRef.current.pause();
-      videoRef.current.srcObject = null;
+      try {
+        scanner.clear();
+      } catch {
+        // Ignore cleanup errors after a failed or partial start.
+      }
+
+      scannerRef.current = null;
     }
 
     setCameraState("idle");
@@ -439,50 +418,10 @@ export default function Index() {
     );
   };
 
-  const scheduleScan = () => {
-    scanTimeoutRef.current = window.setTimeout(async () => {
-      if (
-        !videoRef.current ||
-        !detectorRef.current ||
-        videoRef.current.readyState < HTMLMediaElement.HAVE_CURRENT_DATA
-      ) {
-        scheduleScan();
-        return;
-      }
-
-      try {
-        const barcodes = await detectorRef.current.detect(videoRef.current);
-        const firstMatch = barcodes.find((entry) => entry.rawValue?.trim());
-
-        if (firstMatch?.rawValue) {
-          setCameraMessage(`Scanned ${firstMatch.rawValue}. Looking up product...`);
-          stopCamera();
-          submitLookup(firstMatch.rawValue);
-          return;
-        }
-      } catch {
-        setCameraMessage(
-          "Camera is active, but barcode decoding failed. Try moving closer or improving lighting.",
-        );
-      }
-
-      scheduleScan();
-    }, 350);
-  };
-
   const startCamera = async () => {
-    const BarcodeDetector = getBarcodeDetector();
-
     if (!navigator.mediaDevices?.getUserMedia) {
       setCameraMessage(
         "This browser does not allow camera access here. Use manual entry or a hardware scanner.",
-      );
-      return;
-    }
-
-    if (!BarcodeDetector) {
-      setCameraMessage(
-        "This browser does not support live barcode detection. Use manual entry or a hardware scanner.",
       );
       return;
     }
@@ -491,48 +430,62 @@ export default function Index() {
       setCameraState("starting");
       setCameraMessage("Opening camera...");
 
-      const supportedFormats = BarcodeDetector.getSupportedFormats
-        ? await BarcodeDetector.getSupportedFormats()
-        : [];
-      const formats = supportedFormats.length
-        ? supportedFormats.filter((format) =>
-            [
-              "ean_13",
-              "ean_8",
-              "upc_a",
-              "upc_e",
-              "code_128",
-              "code_39",
-              "qr_code",
-            ].includes(format),
-          )
-        : undefined;
+      lastScannedRef.current = "";
+      await stopCamera();
 
-      detectorRef.current = new BarcodeDetector(
-        formats && formats.length > 0 ? { formats } : undefined,
+      const { Html5Qrcode, Html5QrcodeSupportedFormats } = await import(
+        "html5-qrcode"
       );
 
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: false,
-        video: {
-          facingMode: { ideal: "environment" },
-        },
+      const scanner = new Html5Qrcode("scanner-region", {
+        formatsToSupport: [
+          Html5QrcodeSupportedFormats.EAN_13,
+          Html5QrcodeSupportedFormats.EAN_8,
+          Html5QrcodeSupportedFormats.UPC_A,
+          Html5QrcodeSupportedFormats.UPC_E,
+          Html5QrcodeSupportedFormats.CODE_128,
+          Html5QrcodeSupportedFormats.CODE_39,
+        ],
+        useBarCodeDetectorIfSupported: true,
+        verbose: false,
       });
 
-      streamRef.current = stream;
+      scannerRef.current = scanner;
 
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        await videoRef.current.play();
-      }
+      await scanner.start(
+        { facingMode: "environment" },
+        {
+          fps: 10,
+          qrbox: { width: 280, height: 160 },
+          disableFlip: false,
+          aspectRatio: 1.333334,
+        },
+        (decodedText) => {
+          const normalizedBarcode = normalizeBarcode(decodedText);
+          if (
+            !normalizedBarcode ||
+            normalizedBarcode === lastScannedRef.current
+          ) {
+            return;
+          }
+
+          lastScannedRef.current = normalizedBarcode;
+          setCameraMessage(`Scanned ${normalizedBarcode}. Looking up product...`);
+          void stopCamera().then(() => {
+            submitLookup(normalizedBarcode);
+          });
+        },
+        () => {
+          // Ignore per-frame decode misses while the camera is active.
+        },
+      );
 
       setCameraState("scanning");
       setCameraMessage("Point the camera at a barcode.");
-      scheduleScan();
     } catch {
-      stopCamera();
+      await stopCamera();
       setCameraMessage(
-        "Unable to start the camera. Check camera permission in the browser and try again.",
+        "Unable to start the camera. Check browser camera permission, then try again.",
       );
     }
   };
@@ -547,7 +500,7 @@ export default function Index() {
 
   useEffect(() => {
     return () => {
-      stopCamera();
+      void stopCamera();
     };
   }, []);
 
@@ -608,14 +561,14 @@ export default function Index() {
     background: cameraState === "scanning" ? "#991b1b" : "#14532d",
   };
 
-  const videoStyle = {
+  const scannerRegionStyle = {
     width: "100%",
     maxWidth: "32rem",
     borderRadius: "0.75rem",
     border: "1px solid #8a8a8a",
     background: "#111827",
     aspectRatio: "3 / 4",
-    objectFit: "cover",
+    overflow: "hidden",
   } as const;
 
   return (
@@ -656,13 +609,13 @@ export default function Index() {
         >
           <div style={{ display: "grid", gap: "0.75rem", maxWidth: "32rem" }}>
             <strong>Mobile camera scanner</strong>
-            <video muted playsInline ref={videoRef} style={videoStyle} />
+            <div id="scanner-region" style={scannerRegionStyle} />
             <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap" }}>
               <button
                 disabled={cameraState === "starting"}
                 onClick={() => {
                   if (cameraState === "scanning") {
-                    stopCamera();
+                    void stopCamera();
                     setCameraMessage("Camera stopped.");
                     return;
                   }
