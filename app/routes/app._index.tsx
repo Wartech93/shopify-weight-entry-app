@@ -228,7 +228,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     const response = await admin.graphql(lookupQuery, {
       variables: {
-        query: `barcode:\"${escapeSearchValue(barcode)}\"`,
+        query: `barcode:"${escapeSearchValue(barcode)}"`,
       },
     });
 
@@ -392,11 +392,6 @@ export default function Index() {
   const detectorRef = useRef<InstanceType<BarcodeDetectorClass> | null>(null);
   const scanTimeoutRef = useRef<number | null>(null);
   const [barcode, setBarcode] = useState("");
-  const [weightValue, setWeightValue] = useState("");
-  const [weightUnit, setWeightUnit] = useState<WeightUnit>("GRAMS");
-  const [selectedVariant, setSelectedVariant] = useState<VariantSummary | null>(
-    null,
-  );
   const [cameraState, setCameraState] = useState<
     "idle" | "starting" | "scanning"
   >("idle");
@@ -410,6 +405,9 @@ export default function Index() {
   const isSaveLoading =
     ["loading", "submitting"].includes(saveFetcher.state) &&
     saveFetcher.formMethod === "POST";
+  const selectedVariant =
+    (saveFetcher.data?.intent === "save" ? saveFetcher.data.variant : null) ??
+    (lookupFetcher.data?.intent === "lookup" ? lookupFetcher.data.variant : null);
 
   const stopCamera = () => {
     if (scanTimeoutRef.current != null) {
@@ -544,16 +542,6 @@ export default function Index() {
       return;
     }
 
-    setSelectedVariant(lookupFetcher.data.variant);
-    if (lookupFetcher.data.variant?.weight.value != null) {
-      setWeightValue(String(lookupFetcher.data.variant.weight.value));
-    } else {
-      setWeightValue("");
-    }
-    if (lookupFetcher.data.variant?.weight.unit) {
-      setWeightUnit(lookupFetcher.data.variant.weight.unit);
-    }
-
     shopify.toast.show(lookupFetcher.data.message);
   }, [lookupFetcher.data, shopify]);
 
@@ -566,16 +554,6 @@ export default function Index() {
   useEffect(() => {
     if (saveFetcher.data?.intent !== "save") {
       return;
-    }
-
-    if (saveFetcher.data.variant) {
-      setSelectedVariant(saveFetcher.data.variant);
-      if (saveFetcher.data.variant.weight.value != null) {
-        setWeightValue(String(saveFetcher.data.variant.weight.value));
-      }
-      if (saveFetcher.data.variant.weight.unit) {
-        setWeightUnit(saveFetcher.data.variant.weight.unit);
-      }
     }
 
     shopify.toast.show(saveFetcher.data.message);
@@ -653,7 +631,6 @@ export default function Index() {
           <label style={fieldStyle}>
             <span style={{ fontWeight: 600 }}>Barcode</span>
             <input
-              autoFocus
               autoComplete="off"
               inputMode="numeric"
               name="barcode"
@@ -744,7 +721,11 @@ export default function Index() {
               </div>
             </s-box>
 
-            <saveFetcher.Form method="post" style={formCardStyle}>
+            <saveFetcher.Form
+              key={selectedVariant.id}
+              method="post"
+              style={formCardStyle}
+            >
               <input type="hidden" name="intent" value="save" />
               <input name="productId" type="hidden" value={selectedVariant.productId} />
               <input name="variantId" type="hidden" value={selectedVariant.id} />
@@ -753,15 +734,18 @@ export default function Index() {
               <label style={fieldStyle}>
                 <span style={{ fontWeight: 600 }}>Weight</span>
                 <input
+                  defaultValue={
+                    selectedVariant.weight.value != null
+                      ? String(selectedVariant.weight.value)
+                      : ""
+                  }
                   inputMode="decimal"
                   min="0"
                   name="weightValue"
-                  onChange={(event) => setWeightValue(event.currentTarget.value)}
                   placeholder="0.00"
                   step="0.01"
                   style={inputStyle}
                   type="number"
-                  value={weightValue}
                 />
               </label>
 
@@ -769,11 +753,8 @@ export default function Index() {
                 <span style={{ fontWeight: 600 }}>Unit</span>
                 <select
                   name="weightUnit"
-                  onChange={(event) =>
-                    setWeightUnit(event.currentTarget.value as WeightUnit)
-                  }
+                  defaultValue={selectedVariant.weight.unit ?? "GRAMS"}
                   style={inputStyle}
-                  value={weightUnit}
                 >
                   {unitOptions.map((option) => (
                     <option key={option.value} value={option.value}>
