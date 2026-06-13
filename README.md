@@ -1,5 +1,23 @@
 # Shopify App Template - React Router
 
+## Weight Entry Scaffold
+
+This workspace has been adapted into a Shopify admin app scaffold for barcode-based weight entry.
+
+Current behavior:
+
+- Scan or type a product barcode on the main app page.
+- Look up the matching Shopify variant with the Admin GraphQL API.
+- Display the product, variant, SKU, barcode, and current shipping weight.
+- Save a new weight back to Shopify through `productVariantsBulkUpdate` using `inventoryItem.measurement.weight`.
+
+To finish setup for a real store:
+
+1. Run `npm install`.
+2. Run `npm run dev`.
+3. Sign into Shopify CLI and connect the app to your development store.
+4. Add the required product scopes when prompted so the app can read and update variants.
+
 This is a template for building a [Shopify app](https://shopify.dev/docs/apps/getting-started) using [React Router](https://reactrouter.com/). It was forked from the [Shopify Remix app template](https://github.com/Shopify/shopify-app-template-remix) and converted to React Router.
 
 Rather than cloning this repo, follow the [Quick Start steps](https://github.com/Shopify/shopify-app-template-react-router#quick-start).
