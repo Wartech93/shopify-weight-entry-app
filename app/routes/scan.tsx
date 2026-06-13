@@ -37,6 +37,20 @@ export default function ScanPage() {
     return query ? `${pathname}?${query}` : pathname;
   }, [returnTo, scannedBarcode, shopParam]);
 
+  const continueToWeightEntry = () => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    if (window.opener && !window.opener.closed) {
+      window.opener.location.href = continueUrl;
+      window.close();
+      return;
+    }
+
+    window.location.href = continueUrl;
+  };
+
   const stopCamera = async () => {
     const scanner = scannerRef.current;
 
@@ -196,11 +210,13 @@ export default function ScanPage() {
               </button>
 
               {scannedBarcode ? (
-                <a href={continueUrl} style={{ textDecoration: "none" }}>
-                  <button style={buttonStyle} type="button">
-                    Continue to weight entry
-                  </button>
-                </a>
+                <button
+                  onClick={continueToWeightEntry}
+                  style={buttonStyle}
+                  type="button"
+                >
+                  Continue to weight entry
+                </button>
               ) : null}
             </div>
             <span>{cameraMessage}</span>

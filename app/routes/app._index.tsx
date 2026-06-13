@@ -378,10 +378,35 @@ export default function Index() {
     (saveFetcher.data?.intent === "save" ? saveFetcher.data.variant : null) ??
     (lookupFetcher.data?.intent === "lookup" ? lookupFetcher.data.variant : null);
   const shopParam = searchParams.get("shop") ?? "";
+  const hostParam = searchParams.get("host") ?? "";
+  const embeddedParam = searchParams.get("embedded") ?? "";
   const barcodeFromQuery = normalizeBarcode(searchParams.get("barcode") ?? "");
-  const scannerPath = shopParam
-    ? `/scan?shop=${encodeURIComponent(shopParam)}&returnTo=${encodeURIComponent("/app")}`
-    : "/scan";
+  const scannerReturnParams = new URLSearchParams();
+
+  if (shopParam) {
+    scannerReturnParams.set("shop", shopParam);
+  }
+
+  if (hostParam) {
+    scannerReturnParams.set("host", hostParam);
+  }
+
+  if (embeddedParam) {
+    scannerReturnParams.set("embedded", embeddedParam);
+  }
+
+  const scannerReturnTo = scannerReturnParams.toString()
+    ? `/app?${scannerReturnParams.toString()}`
+    : "/app";
+  const scannerLinkParams = new URLSearchParams();
+
+  if (shopParam) {
+    scannerLinkParams.set("shop", shopParam);
+  }
+
+  scannerLinkParams.set("returnTo", scannerReturnTo);
+
+  const scannerPath = `/scan?${scannerLinkParams.toString()}`;
 
   useEffect(() => {
     if (lookupFetcher.data?.intent !== "lookup") {
