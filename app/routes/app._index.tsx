@@ -1,11 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import type { Html5Qrcode as Html5QrcodeScanner } from "html5-qrcode";
 import type {
   ActionFunctionArgs,
   HeadersFunction,
   LoaderFunctionArgs,
 } from "react-router";
-import { useFetcher } from "react-router";
+import { useFetcher, useSearchParams } from "react-router";
 import { useAppBridge } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
 import { boundary } from "@shopify/shopify-app-react-router/server";
@@ -364,16 +363,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 export default function Index() {
   const lookupFetcher = useFetcher<ActionData>();
   const saveFetcher = useFetcher<ActionData>();
+  const [searchParams] = useSearchParams();
   const shopify = useAppBridge();
-  const scannerRef = useRef<Html5QrcodeScanner | null>(null);
-  const lastScannedRef = useRef("");
+  const lastRequestedBarcodeRef = useRef("");
   const [barcode, setBarcode] = useState("");
-  const [cameraState, setCameraState] = useState<
-    "idle" | "starting" | "scanning"
-  >("idle");
-  const [cameraMessage, setCameraMessage] = useState(
-    "Use your phone camera to scan a barcode. This scanner uses a JavaScript decoder for better mobile compatibility.",
-  );
 
   const isLookupLoading =
     ["loading", "submitting"].includes(lookupFetcher.state) &&
@@ -384,111 +377,11 @@ export default function Index() {
   const selectedVariant =
     (saveFetcher.data?.intent === "save" ? saveFetcher.data.variant : null) ??
     (lookupFetcher.data?.intent === "lookup" ? lookupFetcher.data.variant : null);
-
-  const stopCamera = async () => {
-    const scanner = scannerRef.current;
-
-    if (scanner) {
-      try {
-        if (scanner.isScanning) {
-          await scanner.stop();
-        }
-      } catch {
-        // Ignore shutdown errors from the scanner runtime.
-      }
-
-      try {
-        scanner.clear();
-      } catch {
-        // Ignore cleanup errors after a failed or partial start.
-      }
-
-      scannerRef.current = null;
-    }
-
-    setCameraState("idle");
-  };
-
-  const submitLookup = (scannedBarcode: string) => {
-    const normalized = normalizeBarcode(scannedBarcode);
-    setBarcode(normalized);
-    lookupFetcher.submit(
-      { intent: "lookup", barcode: normalized },
-      { method: "post" },
-    );
-  };
-
-  const startCamera = async () => {
-    if (!navigator.mediaDevices?.getUserMedia) {
-      setCameraMessage(
-        "This browser does not allow camera access here. Use manual entry or a hardware scanner.",
-      );
-      return;
-    }
-
-    try {
-      setCameraState("starting");
-      setCameraMessage("Opening camera...");
-
-      lastScannedRef.current = "";
-      await stopCamera();
-
-      const { Html5Qrcode, Html5QrcodeSupportedFormats } = await import(
-        "html5-qrcode"
-      );
-
-      const scanner = new Html5Qrcode("scanner-region", {
-        formatsToSupport: [
-          Html5QrcodeSupportedFormats.EAN_13,
-          Html5QrcodeSupportedFormats.EAN_8,
-          Html5QrcodeSupportedFormats.UPC_A,
-          Html5QrcodeSupportedFormats.UPC_E,
-          Html5QrcodeSupportedFormats.CODE_128,
-          Html5QrcodeSupportedFormats.CODE_39,
-        ],
-        useBarCodeDetectorIfSupported: true,
-        verbose: false,
-      });
-
-      scannerRef.current = scanner;
-
-      await scanner.start(
-        { facingMode: "environment" },
-        {
-          fps: 10,
-          qrbox: { width: 280, height: 160 },
-          disableFlip: false,
-          aspectRatio: 1.333334,
-        },
-        (decodedText) => {
-          const normalizedBarcode = normalizeBarcode(decodedText);
-          if (
-            !normalizedBarcode ||
-            normalizedBarcode === lastScannedRef.current
-          ) {
-            return;
-          }
-
-          lastScannedRef.current = normalizedBarcode;
-          setCameraMessage(`Scanned ${normalizedBarcode}. Looking up product...`);
-          void stopCamera().then(() => {
-            submitLookup(normalizedBarcode);
-          });
-        },
-        () => {
-          // Ignore per-frame decode misses while the camera is active.
-        },
-      );
-
-      setCameraState("scanning");
-      setCameraMessage("Point the camera at a barcode.");
-    } catch {
-      await stopCamera();
-      setCameraMessage(
-        "Unable to start the camera. Check browser camera permission, then try again.",
-      );
-    }
-  };
+  const shopParam = searchParams.get("shop") ?? "";
+  const barcodeFromQuery = normalizeBarcode(searchParams.get("barcode") ?? "");
+  const scannerPath = shopParam
+    ? `/scan?shop=${encodeURIComponent(shopParam)}&returnTo=${encodeURIComponent("/app")}`
+    : "/scan";
 
   useEffect(() => {
     if (lookupFetcher.data?.intent !== "lookup") {
@@ -499,18 +392,30 @@ export default function Index() {
   }, [lookupFetcher.data, shopify]);
 
   useEffect(() => {
-    return () => {
-      void stopCamera();
-    };
-  }, []);
-
-  useEffect(() => {
     if (saveFetcher.data?.intent !== "save") {
       return;
     }
 
     shopify.toast.show(saveFetcher.data.message);
   }, [saveFetcher.data, shopify]);
+
+  useEffect(() => {
+    if (!barcodeFromQuery) {
+      return;
+    }
+
+    if (barcodeFromQuery === lastRequestedBarcodeRef.current) {
+      return;
+    }
+
+    const normalized = normalizeBarcode(barcodeFromQuery);
+    setBarcode(normalized);
+    lastRequestedBarcodeRef.current = normalized;
+    lookupFetcher.submit(
+      { intent: "lookup", barcode: normalized },
+      { method: "post" },
+    );
+  }, [barcodeFromQuery, lookupFetcher]);
 
   const lookupMessage =
     lookupFetcher.data?.intent === "lookup" ? lookupFetcher.data.message : "";
@@ -556,21 +461,6 @@ export default function Index() {
     background: selectedVariant ? "#111827" : "#9ca3af",
   };
 
-  const cameraButtonStyle = {
-    ...buttonStyle,
-    background: cameraState === "scanning" ? "#991b1b" : "#14532d",
-  };
-
-  const scannerRegionStyle = {
-    width: "100%",
-    maxWidth: "32rem",
-    borderRadius: "0.75rem",
-    border: "1px solid #8a8a8a",
-    background: "#111827",
-    aspectRatio: "3 / 4",
-    overflow: "hidden",
-  } as const;
-
   return (
     <s-page heading="Weight Entry">
       <s-section heading="Scan a barcode">
@@ -609,30 +499,15 @@ export default function Index() {
         >
           <div style={{ display: "grid", gap: "0.75rem", maxWidth: "32rem" }}>
             <strong>Mobile camera scanner</strong>
-            <div id="scanner-region" style={scannerRegionStyle} />
+            <span>
+              Open a standalone scan page outside the Shopify admin iframe, then
+              return to weight entry with the scanned barcode.
+            </span>
             <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap" }}>
-              <button
-                disabled={cameraState === "starting"}
-                onClick={() => {
-                  if (cameraState === "scanning") {
-                    void stopCamera();
-                    setCameraMessage("Camera stopped.");
-                    return;
-                  }
-
-                  void startCamera();
-                }}
-                style={cameraButtonStyle}
-                type="button"
-              >
-                {cameraState === "starting"
-                  ? "Opening camera..."
-                  : cameraState === "scanning"
-                    ? "Stop camera"
-                    : "Scan with camera"}
-              </button>
+              <s-button href={scannerPath} target="_blank">
+                Open standalone scanner
+              </s-button>
             </div>
-            <span>{cameraMessage}</span>
           </div>
         </s-box>
       </s-section>

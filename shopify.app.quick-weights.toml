@@ -2,12 +2,11 @@
 
 client_id = "11888767eff7316c79e43a6acbde366c"
 name = "Quick Weights"
-application_url = "https://example.com"
+application_url = "https://quick-weights.onrender.com"
 embedded = true
 
 [build]
 automatically_update_urls_on_dev = true
-include_config_on_deploy = true
 
 [webhooks]
 api_version = "2026-04"
@@ -19,4 +18,8 @@ optional_scopes = [ ]
 use_legacy_install_flow = false
 
 [auth]
-redirect_urls = [ ]
+redirect_urls = [
+    "https://quick-weights.onrender.com/auth/callback",
+    "https://quick-weights.onrender.com/auth/shopify/callback",
+    "https://quick-weights.onrender.com/api/auth/callback"
+ ]
