@@ -26,7 +26,6 @@ COPY --from=builder /app/build ./build
 COPY --from=builder /app/app ./app
 COPY --from=builder /app/prisma ./prisma
 COPY --from=builder /app/public ./public
-COPY --from=builder /app/.react-router ./.react-router
 COPY --from=builder /app/shopify.app.toml ./shopify.app.toml
 COPY --from=builder /app/shopify.app.quick-weights.toml ./shopify.app.quick-weights.toml
 COPY --from=builder /app/shopify.web.toml ./shopify.web.toml
