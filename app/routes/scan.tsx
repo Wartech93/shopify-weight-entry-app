@@ -22,17 +22,19 @@ export default function ScanPage() {
   const shopParam = searchParams.get("shop") ?? "";
   const returnTo = searchParams.get("returnTo") ?? "/app";
   const continueUrl = useMemo(() => {
-    const destination = new URL(returnTo, window.location.origin);
+    const [pathname, existingQuery = ""] = returnTo.split("?", 2);
+    const params = new URLSearchParams(existingQuery);
 
     if (shopParam) {
-      destination.searchParams.set("shop", shopParam);
+      params.set("shop", shopParam);
     }
 
     if (scannedBarcode) {
-      destination.searchParams.set("barcode", scannedBarcode);
+      params.set("barcode", scannedBarcode);
     }
 
-    return destination.pathname + destination.search;
+    const query = params.toString();
+    return query ? `${pathname}?${query}` : pathname;
   }, [returnTo, scannedBarcode, shopParam]);
 
   const stopCamera = async () => {
